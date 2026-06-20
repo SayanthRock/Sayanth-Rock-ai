@@ -10,8 +10,8 @@ let ai: GoogleGenAI;
 function getAi() {
   if (!ai) {
     const key = process.env.GEMINI_API_KEY;
-    if (!key) {
-      throw new Error('GEMINI_API_KEY environment variable is required.');
+    if (!key || key === 'MY_GEMINI_API_KEY') {
+      throw new Error('Please configure your GEMINI_API_KEY in the AI Studio Settings / Secrets panel.');
     }
     ai = new GoogleGenAI({ apiKey: key });
   }
@@ -56,6 +56,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(JSON.parse(response.text));
   } catch (error: any) {
     console.error("Generate API Error:", error);
-    return NextResponse.json({ error: error.message || 'Failed to generate prompt' }, { status: 500 });
+    
+    let errorMessage = error.message || 'Failed to generate prompt';
+    if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('API key not valid')) {
+      errorMessage = 'Your GEMINI_API_KEY is invalid. Please check the API key in your AI Studio Settings/Secrets panel.';
+    }
+
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
