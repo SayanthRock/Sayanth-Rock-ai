@@ -24,8 +24,7 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  output: process.env.GITHUB_ACTIONS ? 'export' : 'standalone',
-  basePath: process.env.GITHUB_ACTIONS ? '/image-transformer-ai' : '',
+  output: 'standalone',
   transpilePackages: ['motion'],
   webpack: (config, {dev}) => {
     // HMR is disabled in AI Studio via DISABLE_HMR env var.

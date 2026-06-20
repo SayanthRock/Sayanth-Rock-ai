@@ -20,61 +20,27 @@ function getAi() {
 
 export async function POST(req: NextRequest) {
   console.log("API POST /api/generate started");
+  const { prompt, aspectRatio, referenceImage, isEditing } = await req.json();
+  const isEditingMode = referenceImage && isEditing;
+
+  const key = process.env.GEMINI_API_KEY;
+  const isGeminiAvailable = !!(
+    key && 
+    key.trim() !== '' && 
+    key !== 'MY_GEMINI_API_KEY' && 
+    key.length > 15 && 
+    !key.toLowerCase().includes('placeholder')
+  );
+
   try {
-    const { prompt, aspectRatio, referenceImage, isEditing } = await req.json();
-    
-    const key = process.env.GEMINI_API_KEY;
-    const isGeminiAvailable = !!(
-      key && 
-      key.trim() !== '' && 
-      key !== 'MY_GEMINI_API_KEY' && 
-      key.length > 15 && 
-      !key.toLowerCase().includes('placeholder')
-    );
-
     if (!isGeminiAvailable) {
-      // Keyless high-performance fallback using Pollinations AI
-      let width = 1024;
-      let height = 1024;
-      
-      if (aspectRatio === "16:9") {
-        width = 1024;
-        height = 576;
-      } else if (aspectRatio === "9:16") {
-        width = 576;
-        height = 1024;
-      } else if (aspectRatio === "3:4") {
-        width = 768;
-        height = 1024;
-      } else if (aspectRatio === "4:3") {
-        width = 1024;
-        height = 768;
-      }
-
-      const seed = Math.floor(Math.random() * 1000000000);
-      let finalPrompt = prompt || "A scenic fantasy matte painting, cinematic light";
-      if (referenceImage && isEditing) {
-        finalPrompt = `${finalPrompt} (stylized style, artistic blend)`;
-      }
-
-      const pollinationUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
-      
-      const response = await fetch(pollinationUrl);
-      if (!response.ok) {
-        throw new Error(`Fallback generation engine failed with HTTP ${response.status}`);
-      }
-      
-      const buffer = await response.arrayBuffer();
-      const base64Image = Buffer.from(buffer).toString('base64');
-      const generatedImageUrl = `data:image/jpeg;base64,${base64Image}`;
-      
-      return NextResponse.json({ url: generatedImageUrl });
+      throw new Error("Gemini key not configured");
     }
 
     const genAi = getAi();
     const parts: any[] = [];
 
-    if (referenceImage && isEditing) {
+    if (isEditingMode) {
       // Editing Mode
       const mimeType = referenceImage.match(/data:(.*?);base64,/)[1];
       const base64Data = referenceImage.replace(/^data:image\/\w+;base64,/, "");
@@ -125,19 +91,61 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ url: generatedImageUrl });
 
   } catch (error: any) {
-    console.error("Generate API Error:", error);
+    const errorMsg = typeof error === 'string' ? error : (error?.message || '');
+    const isAuthError = errorMsg.includes('401') || 
+                        errorMsg.includes('UNAUTHENTICATED') || 
+                        errorMsg.includes('credentials') || 
+                        errorMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') ||
+                        errorMsg.includes('API_KEY_INVALID') ||
+                        errorMsg.includes('API key not valid');
+
+    console.log(`Gemini generation inactive (${isAuthError ? 'auth/tier constraint' : 'generic context'}). Activating keyless image engine.`);
+
+    // Keyless high-performance fallback using Pollinations AI
+    let width = 1024;
+    let height = 1024;
     
-    // Check for rate limit error (429 or RESOURCE_EXHAUSTED)
-    if (error.status === 429 || error.message.includes('429') || error.message.includes('RESOURCE_EXHAUSTED')) {
-      return NextResponse.json({ error: 'Rate limit exceeded. Please wait a moment before trying again.' }, { status: 429 });
-    }
-    
-    let errorMessage = error.message || 'Failed to generate image';
-    if (errorMessage.includes('API_KEY_INVALID') || errorMessage.includes('API key not valid')) {
-      errorMessage = 'Your GEMINI_API_KEY is invalid. Please check the API key in your AI Studio Settings/Secrets panel.';
+    if (aspectRatio === "16:9") {
+      width = 1024;
+      height = 576;
+    } else if (aspectRatio === "9:16") {
+      width = 576;
+      height = 1024;
+    } else if (aspectRatio === "3:4") {
+      width = 768;
+      height = 1024;
+    } else if (aspectRatio === "4:3") {
+      width = 1024;
+      height = 768;
     }
 
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    const seed = Math.floor(Math.random() * 1000000000);
+    let finalPrompt = prompt || "A scenic fantasy matte painting, cinematic light";
+    if (isEditingMode) {
+      finalPrompt = `${finalPrompt} (stylized style, artistic blend)`;
+    }
+
+    const pollinationUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?width=${width}&height=${height}&seed=${seed}&nologo=true`;
+    
+    try {
+      const response = await fetch(pollinationUrl);
+      if (!response.ok) {
+        throw new Error(`Fallback generation engine failed with HTTP ${response.status}`);
+      }
+      
+      const buffer = await response.arrayBuffer();
+      const base64Image = Buffer.from(buffer).toString('base64');
+      const generatedImageUrl = `data:image/jpeg;base64,${base64Image}`;
+      
+      return NextResponse.json({ 
+        url: generatedImageUrl,
+        wasFallback: true,
+        fallbackReason: isAuthError ? 'auth_failure' : 'api_error'
+      });
+    } catch (fallbackError: any) {
+      console.error("Fallback image generation failed:", fallbackError);
+      return NextResponse.json({ error: error?.message || fallbackError?.message || 'Generation failed' }, { status: 500 });
+    }
   }
 }
 

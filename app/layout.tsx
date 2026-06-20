@@ -29,7 +29,7 @@ const playfair = Playfair_Display({
 });
 
 export const metadata: Metadata = {
-  title: 'Image Transformer AI',
+  title: 'Sayanth Rock AI',
   description: 'Enhance Nano Prompts With Gemini',
 };
 

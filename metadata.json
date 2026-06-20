@@ -1,6 +1,6 @@
 {
-  "name": "Image Transformer AI",
-  "description": "Gemini 3.1 takes your short image prompts and transforms them into detailed JSONs.",
+  "name": "Sayanth Rock AI",
+  "description": "An outstanding AI chat dashboard and image prompter featuring synthesis tuning controllers, tactile synth audio, and advanced cognitive modes.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
