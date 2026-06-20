@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.sayanthrock.ai.app',
-  appName: 'Sayanth Rock AI',
+  appId: 'com.imagetransformer.ai.app',
+  appName: 'Image Transformer AI',
   webDir: 'public',
   server: {
     // This wraps your live web application (with working API routes) into the Android WebView

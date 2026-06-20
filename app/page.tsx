@@ -140,32 +140,36 @@ export default function Home() {
     setResult(null);
     setError(null);
     try {
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-           prompt, 
-           aspectRatio, 
-           referenceImage, 
-           isEditing: !!referenceImage 
-        })
-      });
-      
-      if (!res.ok) {
-        let errorData;
-        try {
-          errorData = await res.json();
-        } catch {
-          throw new Error(`Server error: ${res.status} ${res.statusText}`);
-        }
-        
-        if (res.status === 429) {
-          throw new Error('Rate limit exceeded. Please wait a moment before trying again.');
-        }
-        throw new Error(errorData.error || 'Failed to generate');
+      let res;
+      try {
+        res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+             prompt, 
+             aspectRatio, 
+             referenceImage, 
+             isEditing: !!referenceImage 
+          })
+        });
+      } catch (fetchErr: any) {
+        throw new Error('Network error or server unavailable (Failed to fetch). Please try again.');
       }
       
-      const data = await res.json();
+      let data;
+      try {
+        data = await res.json();
+      } catch (e) {
+        throw new Error(`Server returned invalid response: ${res.status} ${res.statusText}`);
+      }
+
+      if (!res.ok) {
+        if (res.status === 429 || data?.error?.includes('Rate limit')) {
+          throw new Error('Rate limit exceeded. Please wait a moment before trying again.');
+        }
+        throw new Error(data.error || 'Failed to generate');
+      }
+      
       setResult(data.url);
     } catch (err: any) {
       console.error(err);
@@ -485,7 +489,7 @@ export default function Home() {
                       }`}
                     >
                       <div className="font-mono text-[9px] text-zinc-500 uppercase tracking-widest mb-1.5 flex justify-between items-center opacity-60">
-                        <span>{msg.sender === 'user' ? 'User Identity' : 'Sayanth Intelligence'}</span>
+                        <span>{msg.sender === 'user' ? 'User Identity' : 'AI Intelligence'}</span>
                         <span className="text-[8px] font-mono opacity-50 ml-4">{new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                       </div>
                       <div>{msg.text}</div>

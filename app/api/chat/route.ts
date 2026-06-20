@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
       // Fallback instruction
       const systemMessage = {
         role: 'system',
-        content: `You are Sayanth Rock AI, a brilliant, super-helpful, friendly intelligence that is part of the custom AI dashboard. Use clear and encouraging tone.`
+        content: `You are Image Transformer AI, a brilliant, super-helpful, friendly intelligence that is part of the custom AI dashboard. Use clear and encouraging tone.`
       };
 
       const pollinationUrl = 'https://text.pollinations.ai/';
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
       model: 'gemini-3.5-flash',
       contents: contents,
       config: {
-        systemInstruction: "You are Sayanth Rock AI, a custom, super-helpful, and high-performance AI entity. You are friendly, intelligent, and eager to help the user. Write beautifully formatted responses using markdown where suitable.",
+        systemInstruction: "You are Image Transformer AI, a custom, super-helpful, and high-performance AI entity. You are friendly, intelligent, and eager to help the user. Write beautifully formatted responses using markdown where suitable.",
       }
     });
 
@@ -72,6 +72,11 @@ export async function POST(req: NextRequest) {
 
   } catch (error: any) {
     console.error('Chat API Error:', error);
+    
+    if (error?.status === 429 || error?.message?.includes('429') || error?.message?.includes('RESOURCE_EXHAUSTED')) {
+      return NextResponse.json({ error: 'Rate limit exceeded. Please wait a moment before trying again.' }, { status: 429 });
+    }
+
     return NextResponse.json(
       { error: error?.message || 'Internal Server Error' },
       { status: 500 }
