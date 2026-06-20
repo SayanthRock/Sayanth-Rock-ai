@@ -1,0 +1,6 @@
+{
+  "name": "Sayanth Rock AI",
+  "description": "Gemini 3.1 takes your short image prompts and transforms them into detailed JSONs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
