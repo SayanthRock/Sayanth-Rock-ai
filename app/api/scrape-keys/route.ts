@@ -120,14 +120,16 @@ export async function GET(req: NextRequest) {
   const path = searchParams.get('path') || 'README.md';
 
   try {
+    console.log("Fetching keys from GitHub...");
     const result = await parseKeysFromGithub(owner, repo, branch, path);
+    console.log("Successfully parsed keys from GitHub.");
     // If we managed to parse some keys, return them. Otherwise fallback to standard robust keys list.
     if (result.keys && result.keys.length > 0) {
       return NextResponse.json({ keys: result.keys, sourceUrl: result.sourceUrl });
     }
     return NextResponse.json({ keys: FALLBACK_KEYS, sourceUrl: result.sourceUrl, wasFallback: true });
   } catch (err: any) {
-    console.log("Scraping keys from github failed. Activating local robust fallback registry.");
+    console.error("Scraping keys from github failed:", err);
     return NextResponse.json({ 
       keys: FALLBACK_KEYS, 
       sourceUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`,
@@ -145,13 +147,15 @@ export async function POST(req: NextRequest) {
     const path = body.path || 'README.md';
 
     try {
+      console.log("POST: Fetching keys from GitHub...");
       const result = await parseKeysFromGithub(owner, repo, branch, path);
+      console.log("POST: Successfully parsed keys from GitHub.");
       if (result.keys && result.keys.length > 0) {
         return NextResponse.json({ keys: result.keys, sourceUrl: result.sourceUrl });
       }
       return NextResponse.json({ keys: FALLBACK_KEYS, sourceUrl: result.sourceUrl, wasFallback: true });
     } catch (err: any) {
-      console.log("Post scrape failed, utilizing local fallback registry.");
+      console.error("POST: Scraping keys from github failed:", err);
       return NextResponse.json({ 
         keys: FALLBACK_KEYS, 
         sourceUrl: `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`,

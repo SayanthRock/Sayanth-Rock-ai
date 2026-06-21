@@ -9,6 +9,11 @@ import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Sparkles, Download, Check, Plus, Terminal, CodeXml, Loader2, Image as ImageIcon, Wand2, Upload, Key, Server, Copy, Github, Search, RefreshCw, ExternalLink, MessageSquare, Send, Bot, User, Volume2, VolumeX, Sliders, Cpu, Trash2, History, Radio, Mic, Activity, Video, Play, Square, Compass, MapPin, HelpCircle, Globe } from 'lucide-react';
 import Image from 'next/image';
+import ImageGallery from '../components/ImageGallery';
+import LoadingAnimation from '../components/LoadingAnimation';
+import { signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+import { auth } from '../lib/firebase';
+import { useAuth } from '../components/FirebaseProvider';
 
 // Raw Audio Synthesis for tactile, immersive sound design feedback
 let audioCtx: AudioContext | null = null;
@@ -185,7 +190,8 @@ function parseInlineMarks(text: string) {
 const ASPECT_RATIOS = ["1:1", "16:9", "9:16", "3:4", "4:3"];
 
 export default function Home() {
-  const [activeTab, setActiveTab] = useState<'image' | 'chat' | 'keys' | 'live' | 'tools'>('image');
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState<'image' | 'chat' | 'music' | 'video' | 'keys' | 'live' | 'tools'>('image');
   
   // Image Generation State
   const [prompt, setPrompt] = useState('');
@@ -213,6 +219,7 @@ export default function Home() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [sourceUrl, setSourceUrl] = useState('https://raw.githubusercontent.com/alistaitsacle/free-llm-api-keys/main/README.md');
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [blueprintCategory, setBlueprintCategory] = useState('All');
 
   // Chat AI State
   const [chatMessages, setChatMessages] = useState<Array<{ sender: 'user' | 'assistant'; text: string; modelUsed?: string }>>([
@@ -265,6 +272,17 @@ export default function Home() {
   const [toasterMessage, setToasterMessage] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
+  const [imageHistory, setImageHistory] = useState<Array<{ url: string; prompt: string; aspectRatio: string; timestamp: number }>>([]);
+  
+  // Music Generation
+  const [musicPrompt, setMusicPrompt] = useState('');
+  const [isGeneratingMusic, setIsGeneratingMusic] = useState(false);
+  const [musicUrl, setMusicUrl] = useState<string | null>(null);
+
+  // Video Generation
+  const [videoPrompt, setVideoPrompt] = useState('');
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
+  const [videoUrl, setVideoUrl] = useState<string | null>(null);
 
   const triggerToaster = (msg: string) => {
     setToasterMessage(msg);
@@ -499,6 +517,17 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('image_history');
+      if (stored) {
+        try {
+          setImageHistory(JSON.parse(stored));
+        } catch (e) { console.error(e); }
+      }
+    }
+  }, []);
+
+  useEffect(() => {
     if (activeTab === 'chat') {
       chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
@@ -626,14 +655,18 @@ export default function Home() {
       });
       
       if (!res.ok) {
-        let errMsg = 'Failed to fetch keys';
+        console.error(`API request failed with status ${res.status}`);
+        let errMsg = `Failed to fetch keys (Status: ${res.status})`;
         try {
-          const errData = await res.json();
-          errMsg = errData.error || errMsg;
-        } catch {
-          try {
-            errMsg = await res.text();
-          } catch {}
+          const contentType = res.headers.get('content-type');
+          if (contentType && contentType.includes('application/json')) {
+            const errData = await res.json();
+            errMsg = errData.error || errData.message || errMsg;
+          } else {
+            errMsg = await res.text() || errMsg;
+          }
+        } catch (e) {
+          console.error("Failed to parse error response", e);
         }
         throw new Error(errMsg);
       }
@@ -694,11 +727,58 @@ export default function Home() {
       
       const data = await res.json();
       setResult(data.url);
+      
+      const newEntry = { url: data.url, prompt, aspectRatio, timestamp: Date.now() };
+      const updatedHistory = [newEntry, ...imageHistory];
+      setImageHistory(updatedHistory);
+      localStorage.setItem('image_history', JSON.stringify(updatedHistory));
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Error generating image.');
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleGenerateMusic = async () => {
+    if (!musicPrompt.trim()) return;
+    setIsGeneratingMusic(true);
+    setMusicUrl(null);
+    try {
+        const res = await fetch('/api/generate-music', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: musicPrompt })
+        });
+        if (!res.ok) throw new Error('Failed to generate music');
+        const data = await res.json();
+        setMusicUrl(data.musicUrl);
+    } catch (err: any) {
+        console.error(err);
+        triggerToaster(err.message || 'Error generating music.');
+    } finally {
+        setIsGeneratingMusic(false);
+    }
+  };
+
+  const handleGenerateVideo = async () => {
+    if (!videoPrompt.trim()) return;
+    setIsGeneratingVideo(true);
+    setVideoUrl(null);
+    try {
+        const res = await fetch('/api/generate-video', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: videoPrompt, aspectRatio: '16:9' })
+        });
+        if (!res.ok) throw new Error('Failed to generate video');
+        const data = await res.json();
+        setVideoUrl(data.operationName);
+    } catch (err: any) {
+        console.error(err);
+        triggerToaster(err.message || 'Error generating video.');
+    } finally {
+        setIsGeneratingVideo(false);
     }
   };
 
@@ -745,36 +825,48 @@ export default function Home() {
           className="mb-10 border-b border-zinc-800 pb-8 flex flex-col md:flex-row gap-6 justify-between items-start md:items-end"
         >
           <div>
-            <div className="flex items-center gap-2 text-[#FFCC00] text-sm uppercase tracking-widest font-mono mb-4">
+            <div className="flex items-center gap-2 text-indigo-500 text-sm uppercase tracking-widest font-mono mb-4">
                <ImageIcon className="w-4 h-4" />
               <span>Image Engine</span>
             </div>
             <h1 className="font-display text-5xl md:text-7xl text-white uppercase tracking-tighter" style={{ fontFamily: 'var(--font-display)' }}>
-              Image <span className="text-[#FFCC00]">Transformer AI</span>
+              Sayanth Rock <span className="text-indigo-500">AI</span>
             </h1>
           </div>
           <div className="text-zinc-500 font-mono text-sm max-w-sm md:text-right">
-            Intelligent Image Generation & Free LLM API Key Directory
+            Sayanth Rock AI Free API Directory.
           </div>
         </motion.header>
 
         <div className="flex justify-center mb-12">
-           <div className="inline-flex bg-[#0A0A0A] border border-zinc-800 p-1 flex-wrap justify-center gap-1">
+            <div className="inline-flex bg-zinc-950/50 border border-zinc-800/50 p-1.5 rounded-xl backdrop-blur-sm flex-wrap justify-center gap-1">
               <button 
                 onClick={() => setActiveTab('image')}
-                className={`px-6 md:px-8 py-3 flex items-center gap-3 font-mono text-xs uppercase tracking-widest transition-colors ${activeTab === 'image' ? 'bg-[#FFCC00] text-black shadow-[0_0_15px_rgba(255,204,0,0.2)]' : 'text-zinc-400 hover:text-white'}`}
+                className={`px-6 md:px-8 py-3 flex items-center gap-3 font-mono text-xs uppercase tracking-widest transition-all rounded-lg ${activeTab === 'image' ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(79,70,229,0.3)]' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'}`}
               >
                 <ImageIcon className="w-4 h-4" /> Generate Image
               </button>
               <button 
                 onClick={() => setActiveTab('chat')}
-                className={`px-6 md:px-8 py-3 flex items-center gap-3 font-mono text-xs uppercase tracking-widest transition-colors ${activeTab === 'chat' ? 'bg-[#FFCC00] text-black shadow-[0_0_15px_rgba(255,204,0,0.2)]' : 'text-zinc-400 hover:text-white'}`}
+                className={`px-6 md:px-8 py-3 flex items-center gap-3 font-mono text-xs uppercase tracking-widest transition-all rounded-lg ${activeTab === 'chat' ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(79,70,229,0.3)]' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'}`}
               >
                 <MessageSquare className="w-4 h-4" /> Chat AI
               </button>
               <button 
+                onClick={() => setActiveTab('music')}
+                className={`px-6 md:px-8 py-3 flex items-center gap-3 font-mono text-xs uppercase tracking-widest transition-all rounded-lg ${activeTab === 'music' ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(79,70,229,0.3)]' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'}`}
+              >
+                <Mic className="w-4 h-4" /> Generate Music
+              </button>
+              <button 
+                onClick={() => setActiveTab('video')}
+                className={`px-6 md:px-8 py-3 flex items-center gap-3 font-mono text-xs uppercase tracking-widest transition-all rounded-lg ${activeTab === 'video' ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(79,70,229,0.3)]' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'}`}
+              >
+                <Video className="w-4 h-4" /> Generate Video
+              </button>
+              <button 
                 onClick={() => setActiveTab('keys')}
-                className={`px-6 md:px-8 py-3 flex items-center gap-3 font-mono text-xs uppercase tracking-widest transition-colors ${activeTab === 'keys' ? 'bg-[#FFCC00] text-black shadow-[0_0_15px_rgba(255,204,0,0.2)]' : 'text-zinc-400 hover:text-white'}`}
+                className={`px-6 md:px-8 py-3 flex items-center gap-3 font-mono text-xs uppercase tracking-widest transition-all rounded-lg ${activeTab === 'keys' ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(79,70,229,0.3)]' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'}`}
               >
                 <Key className="w-4 h-4" /> Free API Keys
               </button>
@@ -783,7 +875,7 @@ export default function Home() {
                   setActiveTab('live');
                   if (chatSoundEnabled) playSound('click');
                 }}
-                className={`px-6 md:px-8 py-3 flex items-center gap-3 font-mono text-xs uppercase tracking-widest transition-colors ${activeTab === 'live' ? 'bg-[#FFCC00] text-black shadow-[0_0_15px_rgba(255,204,0,0.2)]' : 'text-zinc-400 hover:text-white'}`}
+                className={`px-6 md:px-8 py-3 flex items-center gap-3 font-mono text-xs uppercase tracking-widest transition-all rounded-lg ${activeTab === 'live' ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(79,70,229,0.3)]' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'}`}
               >
                 <Radio className="w-4 h-4" /> Live API (Beta)
               </button>
@@ -792,7 +884,7 @@ export default function Home() {
                   setActiveTab('tools');
                   if (chatSoundEnabled) playSound('click');
                 }}
-                className={`px-6 md:px-8 py-3 flex items-center gap-3 font-mono text-xs uppercase tracking-widest transition-colors ${activeTab === 'tools' ? 'bg-[#FFCC00] text-black shadow-[0_0_15px_rgba(255,204,0,0.2)]' : 'text-zinc-400 hover:text-white'}`}
+                className={`px-6 md:px-8 py-3 flex items-center gap-3 font-mono text-xs uppercase tracking-widest transition-all rounded-lg ${activeTab === 'tools' ? 'bg-indigo-600 text-white shadow-[0_0_15px_rgba(79,70,229,0.3)]' : 'text-zinc-400 hover:text-white hover:bg-zinc-900'}`}
               >
                 <Sliders className="w-4 h-4" /> Tools API
               </button>
@@ -1016,6 +1108,7 @@ export default function Home() {
                  )}
                </div>
              </button>
+             <ImageGallery history={imageHistory} onLoadPrompt={(p, a) => { setPrompt(p); setAspectRatio(a); }} />
            </motion.div>
            
            {/* Right Column: Output */}
@@ -1040,16 +1133,7 @@ export default function Home() {
              <div className="flex-1 w-full h-[500px] xl:h-full relative flex items-center justify-center bg-zinc-950/50 mt-14">
                 <AnimatePresence mode="wait">
                   {isGenerating ? (
-                     <motion.div 
-                       key="loading"
-                       initial={{ opacity: 0 }}
-                       animate={{ opacity: 1 }}
-                       exit={{ opacity: 0 }}
-                       className="absolute inset-0 flex flex-col items-center justify-center text-[#FFCC00] font-mono text-xs uppercase tracking-widest bg-[#0A0A0A]"
-                     >
-                       <Loader2 className="w-8 h-8 mb-4 animate-spin text-[#FFCC00]" />
-                       <span className="animate-pulse">Rendering Image Data...</span>
-                     </motion.div>
+                     <LoadingAnimation />
                   ) : error ? (
                      <motion.div 
                        key="error"
@@ -1095,6 +1179,31 @@ export default function Home() {
              </div>
            </motion.div>
         </div>
+        )}
+
+        {activeTab === 'music' && (
+          <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="max-w-2xl mx-auto space-y-6">
+            <h2 className="text-2xl font-display text-white">Generate Music</h2>
+            <textarea value={musicPrompt} onChange={(e) => setMusicPrompt(e.target.value)} className="w-full bg-zinc-900 text-white p-4 rounded" placeholder="Enter music prompt..."></textarea>
+            <button onClick={handleGenerateMusic} className="bg-indigo-600 text-white px-6 py-2 rounded-lg" disabled={isGeneratingMusic}>
+              {isGeneratingMusic ? 'Generating...' : 'Generate Music'}
+            </button>
+            {musicUrl && <audio controls src={musicUrl} className="w-full" />}
+          </motion.div>
+        )}
+        {activeTab === 'video' && (
+          <motion.div initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} className="max-w-2xl mx-auto space-y-6">
+            <h2 className="text-2xl font-display text-white">Generate Video</h2>
+            <textarea value={videoPrompt} onChange={(e) => setVideoPrompt(e.target.value)} className="w-full bg-zinc-900 text-white p-4 rounded" placeholder="Enter video prompt..."></textarea>
+            <button onClick={handleGenerateVideo} className="bg-indigo-600 text-white px-6 py-2 rounded-lg" disabled={isGeneratingVideo}>
+              {isGeneratingVideo ? 'Generating...' : 'Generate Video'}
+            </button>
+            {videoUrl && (
+                <div className="text-sm text-zinc-400 bg-zinc-900 p-4 rounded">
+                  Video generation started: {videoUrl}
+                </div>
+            )}
+          </motion.div>
         )}
 
         {activeTab === 'chat' && (
@@ -1262,23 +1371,50 @@ export default function Home() {
 
                 {/* Interactive Preset suggestions list above the input console */}
                 <div className="bg-[#050506] border-t border-zinc-900 p-4 select-none">
-                  <div className="flex items-center gap-1 mb-2.5">
-                    <Sparkles className="w-3 h-3 text-[#FFCC00]" />
-                    <span className="text-[9px] text-zinc-500 font-mono uppercase tracking-widest font-bold">Suggested Prompt blueprints:</span>
+                  <div className="flex items-center justify-between mb-2.5">
+                    <div className="flex items-center gap-1">
+                      <Sparkles className="w-3 h-3 text-[#FFCC00]" />
+                      <span className="text-[9px] text-zinc-500 font-mono uppercase tracking-widest font-bold">Suggested Prompt blueprints:</span>
+                    </div>
+                    <select 
+                      value={blueprintCategory}
+                      onChange={(e) => setBlueprintCategory(e.target.value)}
+                      className="bg-zinc-950 text-zinc-400 font-mono text-[9px] border border-zinc-800 rounded px-2 py-0.5 outline-none hover:border-zinc-700 focus:border-[#FFCC00]"
+                    >
+                      <option value="All">All Styles</option>
+                      <option value="Cinematic">Cinematic</option>
+                      <option value="Abstract">Abstract</option>
+                      <option value="Technical">Technical</option>
+                      <option value="Fantasy">Fantasy</option>
+                    </select>
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {[
                       {
                         title: "Cyberpunk Rainscape",
                         desc: "Visual prompt with glowing holograms & chrome details",
-                        promptText: "A hyper-detailed photorealistic cyberpunk city street in torrential rain, towering glowing holographic billboards in violet and neon amber, reflecting off wet asphalt, flying shuttle vehicles, ultra high resolution 8k, photorealistic octane render."
+                        promptText: "A hyper-detailed photorealistic cyberpunk city street in torrential rain, towering glowing holographic billboards in violet and neon amber, reflecting off wet asphalt, flying shuttle vehicles, ultra high resolution 8k, photorealistic octane render.",
+                        category: "Cinematic"
                       },
                       {
                         title: "Fantasy Castle ruins",
                         desc: "Surreal ethereal fantasy prompt in twilight golden light",
-                        promptText: "Ethereal ruins of an ancient gothic castle sitting on a steep high cliff at celestial twilight, floating glowing runic islands in the sky, warm golden rays, painterly soft hyperrealistic style, highly detailed fantasy environment."
+                        promptText: "Ethereal ruins of an ancient gothic castle sitting on a steep high cliff at celestial twilight, floating glowing runic islands in the sky, warm golden rays, painterly soft hyperrealistic style, highly detailed fantasy environment.",
+                        category: "Fantasy"
+                      },
+                      {
+                        title: "Data Visualization",
+                        desc: "Abstract network structure in high contrast",
+                        promptText: "Abstract network visualization of global data streams, glowing nodes connected by fiber optic light trails, dark background, cinematic volumetric lighting, 8k resolution, minimalist style.",
+                        category: "Abstract"
+                      },
+                      {
+                        title: "Circuitry Schematic",
+                        desc: "Detailed technical PCB design top-down view",
+                        promptText: "Top-down macro shot of a complex high-tech PCB board, gold-plated pathways, intricate microscopic components, realistic materials, sharp focus, cinematic lighting, industrial design aesthetic.",
+                        category: "Technical"
                       }
-                    ].map((suggestion, sIdx) => (
+                    ].filter(s => blueprintCategory === 'All' || s.category === blueprintCategory).map((suggestion, sIdx) => (
                       <button
                         key={sIdx}
                         onClick={() => {
@@ -1556,6 +1692,20 @@ export default function Home() {
                           <Github className="w-4 h-4" />
                           <span>GitHub Connect Configuration</span>
                         </div>
+                        {user ? (
+                          <div className="text-zinc-300 font-mono text-xs">Logged in as {user.email}</div>
+                        ) : (
+                          <button onClick={async () => {
+                            const provider = new GoogleAuthProvider();
+                            try {
+                                await signInWithPopup(auth, provider);
+                                triggerToaster("Logged in successfully!");
+                            } catch (error) {
+                                console.error("Login failed:", error);
+                                triggerToaster("Login failed.");
+                            }
+                          }} className="text-white font-mono text-xs border border-zinc-700 px-3 py-1 hover:bg-zinc-800 transition-colors">Sign in with Google</button>
+                        )}
                         <h2 className="font-display text-3xl text-white uppercase tracking-tight">
                           Dynamize Key Registry
                         </h2>
@@ -2712,8 +2862,8 @@ ws.on('message', (data) => {
              className="space-y-10"
            >
              {/* Built-in & Custom Tools Overview Card */}
-             <div id="tools-top-banner" className="bg-[#0A0A0A] border border-zinc-800 p-8 shadow-2xl relative overflow-hidden group">
-               <div className="absolute top-0 left-0 w-full h-1 bg-[#FFCC00]" />
+             <div id="tools-top-banner" className="bg-zinc-950 border border-indigo-500/30 p-8 shadow-lg shadow-indigo-500/10 rounded-2xl relative overflow-hidden group">
+               <div className="absolute top-0 left-0 w-full h-1 bg-indigo-500" />
                <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 pb-6 border-b border-zinc-900/60 mb-6">
                  <div>
                    <div className="flex items-center gap-2 font-mono text-xs text-[#FFCC00] uppercase tracking-widest">
@@ -3187,7 +3337,7 @@ console.log(response.text);`}
          )}
       </div>
 
-      {/* Floating Sparkle Toaster Banner */}
+      {/* Start of Floating Sparkle Toaster Banner */}
       <AnimatePresence>
         {toasterMessage && (
           <motion.div

@@ -33,10 +33,16 @@ export const metadata: Metadata = {
   description: 'Enhance Nano Prompts With Gemini',
 };
 
+import { FirebaseProvider } from '../components/FirebaseProvider';
+
 export default function RootLayout({children}: {children: React.ReactNode}) {
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${anton.variable} ${playfair.variable}`}>
-      <body suppressHydrationWarning>{children}</body>
+      <body suppressHydrationWarning>
+        <FirebaseProvider>
+          {children}
+        </FirebaseProvider>
+      </body>
     </html>
   );
 }
