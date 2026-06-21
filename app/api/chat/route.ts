@@ -1,6 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 import { NextRequest, NextResponse } from 'next/server';
 
+export const dynamic = 'force-dynamic';
+
 let ai: GoogleGenAI;
 
 const getSystemInstruction = (style: string) => {
@@ -182,7 +184,14 @@ export async function POST(req: NextRequest) {
     try {
       // Initialize Gemini
       if (!ai) {
-        ai = new GoogleGenAI({ apiKey: key });
+        ai = new GoogleGenAI({ 
+          apiKey: key,
+          httpOptions: {
+            headers: {
+              'User-Agent': 'aistudio-build',
+            }
+          }
+        });
       }
 
       const contents = messages.map((m: any) => ({
