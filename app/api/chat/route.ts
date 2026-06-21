@@ -3,8 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-let ai: GoogleGenAI;
-
 const getSystemInstruction = (style: string) => {
   switch (style) {
     case 'prompter':
@@ -36,35 +34,6 @@ export async function POST(req: NextRequest) {
       key.length > 15 && 
       !key.toLowerCase().includes('placeholder')
     );
-
-    // Reusable pollination fallback function
-    const runPollinationsFallbackWithModel = async (pModel: string) => {
-      const formattedMessages = messages.map((m: any) => ({
-        role: m.sender === 'user' ? 'user' : 'assistant',
-        content: m.text
-      }));
-
-      const systemMessage = {
-        role: 'system',
-        content: getSystemInstruction(currentStyle) + " Keep your responses extremely engaging and formatted elegantly using markdown spacing."
-      };
-
-      const pollinationUrl = 'https://text.pollinations.ai/';
-      const response = await fetch(pollinationUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          messages: [systemMessage, ...formattedMessages],
-          model: pModel
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Fallback chat engine failed with HTTP ${response.status}`);
-      }
-
-      return await response.text();
-    };
 
     // Standard OpenAI fetch completions (generic OpenAI API calls)
     const fetchCustomModel = async (baseUrl: string, apiKey: string, modelName: string) => {
@@ -129,9 +98,11 @@ export async function POST(req: NextRequest) {
           console.warn("Interactive key failed, cascading...", e);
         }
       }
-      // 3. Fallback to free high performance keyless engine
-      const reply = await runPollinationsFallbackWithModel('openai');
-      return NextResponse.json({ reply, wasFallback: true, modelUsed: 'ChatGPT (keyless)' });
+      // 3. Fallback: No key provided
+      return NextResponse.json(
+        { error: "ChatGPT API key is not configured. Please set your OPENAI_API_KEY or provide a custom model key." },
+        { status: 401 }
+      );
     }
 
     if (activeTier === 'claude') {
@@ -151,8 +122,11 @@ export async function POST(req: NextRequest) {
           console.warn("Interactive key failed, cascading...", e);
         }
       }
-      const reply = await runPollinationsFallbackWithModel('claude');
-      return NextResponse.json({ reply, wasFallback: true, modelUsed: 'Claude (keyless)' });
+      // Fallback: No key provided
+      return NextResponse.json(
+        { error: "Claude API key is not configured. Please set your ANTHROPIC_API_KEY or provide a custom model key." },
+        { status: 401 }
+      );
     }
 
     if (activeTier === 'custom') {
@@ -177,62 +151,54 @@ export async function POST(req: NextRequest) {
 
     // Default: Gemini Tier
     if (!isGeminiAvailable) {
-      const reply = await runPollinationsFallbackWithModel('gemini');
-      return NextResponse.json({ reply, wasFallback: true, modelUsed: 'Gemini (keyless)' });
+      return NextResponse.json(
+        { error: "Gemini API key is not configured. Please set up your API key in Settings > Secrets." },
+        { status: 401 }
+      );
     }
 
     try {
       // Initialize Gemini
-      if (!ai) {
-        ai = new GoogleGenAI({ 
-          apiKey: key,
-          httpOptions: {
-            headers: {
-              'User-Agent': 'aistudio-build',
-            }
-          }
-        });
-      }
+      const ai = new GoogleGenAI({});
 
-      const contents = messages.map((m: any) => ({
+      const user_input = messages.map((m: any) => ({
         role: m.sender === 'user' ? 'user' : 'model',
-        parts: [{ text: m.text }]
+        content: [{ type: 'text', text: m.text }]
       }));
 
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.5-flash',
-        contents: contents,
-        config: {
-          systemInstruction: getSystemInstruction(currentStyle),
+      // Use the Interactions API
+      const interaction = await ai.interactions.create({
+        model: 'gemini-3.1-pro-preview-customtools',
+        input: user_input,
+        system_instruction: getSystemInstruction(currentStyle),
+        tools: [
+          { type: 'google_search' },
+          { type: 'url_context' },
+          { type: 'code_execution' }
+        ],
+        generation_config: {
           temperature: currentTemp,
-          maxOutputTokens: currentMaxTokens,
+          max_output_tokens: currentMaxTokens,
         }
       });
 
-      const reply = response.text || "I was unable to formulate a response.";
-      return NextResponse.json({ reply, modelUsed: 'Gemini 3.5 Flash' });
-
-    } catch (geminiError: any) {
-      const geminiErrorMsg = typeof geminiError === 'string' ? geminiError : (geminiError?.message || '');
-      const isAuthError = geminiErrorMsg.includes('401') || geminiErrorMsg.includes('UNAUTHENTICATED');
-      console.log(`Gemini chat offline (${isAuthError ? 'auth/tier' : 'api error'}). Routing to keyless text engine.`);
-      try {
-        const reply = await runPollinationsFallbackWithModel('gemini');
-        return NextResponse.json({ 
-          reply, 
-          wasFallback: true, 
-          fallbackReason: geminiError?.message?.includes('401') ? 'auth_failure' : 'api_error',
-          modelUsed: 'Gemini (keyless)'
-        });
-      } catch (fallbackError: any) {
-        console.error("Fallback chat failed:", fallbackError);
-        return NextResponse.json(
-          { error: geminiError?.message || fallbackError?.message || 'Chat generation failed' },
-          { status: 500 }
-        );
+      // Safely get text content
+      let reply = "I was unable to formulate a response.";
+      const interactionAny = interaction as any;
+      if (interactionAny.steps && interactionAny.steps.length > 0) {
+        const lastStep = interactionAny.steps[interactionAny.steps.length - 1];
+        if (lastStep.type === 'model_output' && lastStep.content) {
+          reply = lastStep.content.map((c: any) => c.text).join('') || reply;
+        }
       }
+      return NextResponse.json({ reply, modelUsed: 'Gemini 3.1 Pro (Custom Tools)' });
+    } catch (geminiError: any) {
+      console.error('Gemini API Error:', geminiError);
+      return NextResponse.json(
+        { error: geminiError?.message || 'Chat generation failed' },
+        { status: 500 }
+      );
     }
-
   } catch (error: any) {
     console.error('Chat API Error:', error);
     return NextResponse.json(
